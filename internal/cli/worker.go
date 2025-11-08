@@ -69,13 +69,14 @@ var workerCmd = &cobra.Command{
 }
 
 func init() {
-	workerStartCmd.Flags().IntP("count", "c", 1, "Number of workers to start")
-	
 	// Set default from config
 	cfg, err := config.Load()
+	defaultCount := 1
 	if err == nil {
-		workerStartCmd.Flags().SetDefault("count", fmt.Sprintf("%d", cfg.WorkerCount))
+		defaultCount = cfg.WorkerCount
 	}
+	
+	workerStartCmd.Flags().IntP("count", "c", defaultCount, "Number of workers to start")
 
 	workerCmd.AddCommand(workerStartCmd)
 	workerCmd.AddCommand(workerStopCmd)

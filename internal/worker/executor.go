@@ -1,9 +1,7 @@
 package worker
 
 import (
-	"database/sql"
 	"fmt"
-	"time"
 
 	"queuectl/internal/config"
 	"queuectl/internal/db"
