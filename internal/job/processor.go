@@ -2,7 +2,6 @@ package job
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"time"
