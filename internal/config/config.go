@@ -125,28 +125,28 @@ func Set(key, value string) error {
 	case KeyMaxRetries:
 		var maxRetries int
 		if _, err := fmt.Sscanf(value, "%d", &maxRetries); err != nil {
-			return fmt.Errorf("invalid value for max-retries: %s", value)
+			return fmt.Errorf("invalid value for max-retries: '%s' (must be a number)", value)
 		}
 		if maxRetries < 0 {
-			return fmt.Errorf("max-retries must be non-negative")
+			return fmt.Errorf("max-retries must be non-negative (got: %d)", maxRetries)
 		}
 		config.MaxRetries = maxRetries
 	case KeyBackoffBase:
 		var backoffBase float64
 		if _, err := fmt.Sscanf(value, "%f", &backoffBase); err != nil {
-			return fmt.Errorf("invalid value for backoff-base: %s", value)
+			return fmt.Errorf("invalid value for backoff-base: '%s' (must be a number)", value)
 		}
 		if backoffBase <= 0 {
-			return fmt.Errorf("backoff-base must be positive")
+			return fmt.Errorf("backoff-base must be positive (got: %.2f)", backoffBase)
 		}
 		config.BackoffBase = backoffBase
 	case KeyWorkerCount:
 		var workerCount int
 		if _, err := fmt.Sscanf(value, "%d", &workerCount); err != nil {
-			return fmt.Errorf("invalid value for worker-count: %s", value)
+			return fmt.Errorf("invalid value for worker-count: '%s' (must be a number)", value)
 		}
 		if workerCount < 1 {
-			return fmt.Errorf("worker-count must be at least 1")
+			return fmt.Errorf("worker-count must be at least 1 (got: %d)", workerCount)
 		}
 		config.WorkerCount = workerCount
 	default:

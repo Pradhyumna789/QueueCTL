@@ -17,14 +17,22 @@ var enqueueCmd = &cobra.Command{
 
 		j, err := job.FromJSON(jsonStr)
 		if err != nil {
-			return fmt.Errorf("failed to parse job: %w", err)
+			return fmt.Errorf("❌ Invalid JSON format: %w\n\n💡 Example: {\"id\":\"job1\",\"command\":\"echo hello\"}", err)
 		}
 
 		if err := job.Create(j); err != nil {
-			return fmt.Errorf("failed to enqueue job: %w", err)
+			// Check if it's a duplicate ID error
+			if err.Error() == fmt.Sprintf("job with ID '%s' already exists", j.ID) {
+				existingJob, getErr := job.GetByID(j.ID)
+				if getErr == nil && existingJob != nil {
+					return fmt.Errorf("❌ Job with ID '%s' already exists (state: %s)\n\n💡 Solutions:\n   • Use a different job ID\n   • Check existing jobs: queuectl list\n   • Clear database: rm ~/.queuectl/queuectl.db", j.ID, existingJob.State)
+				}
+				return fmt.Errorf("❌ Job with ID '%s' already exists\n\n💡 Use a different job ID or clear the database: rm ~/.queuectl/queuectl.db", j.ID)
+			}
+			return fmt.Errorf("❌ Failed to enqueue job: %w", err)
 		}
 
-		fmt.Printf("Job '%s' enqueued successfully\n", j.ID)
+		fmt.Printf("✅ Job '%s' enqueued successfully\n", j.ID)
 		return nil
 	},
 }

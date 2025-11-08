@@ -22,14 +22,14 @@ var workerStartCmd = &cobra.Command{
 		}
 
 		if count < 1 {
-			return fmt.Errorf("worker count must be at least 1")
+			return fmt.Errorf("❌ Worker count must be at least 1\n\n💡 Example: queuectl worker start --count 2")
 		}
 
 		if err := worker.StartPool(count); err != nil {
-			return fmt.Errorf("failed to start workers: %w", err)
+			return fmt.Errorf("❌ Failed to start workers: %w\n\n💡 Make sure workers aren't already running: queuectl worker stop", err)
 		}
 
-		fmt.Printf("Started %d worker(s)\n", count)
+		fmt.Printf("✅ Started %d worker(s)\n", count)
 
 		// Set up signal handling for graceful shutdown
 		sigChan := make(chan os.Signal, 1)
@@ -54,10 +54,10 @@ var workerStopCmd = &cobra.Command{
 	Long:  `Stop all running worker processes gracefully.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := worker.StopPool(); err != nil {
-			return fmt.Errorf("failed to stop workers: %w", err)
+			return fmt.Errorf("❌ Failed to stop workers: %w\n\n💡 Workers may not be running. Check status: queuectl status", err)
 		}
 
-		fmt.Println("Workers stopped")
+		fmt.Println("✅ Workers stopped")
 		return nil
 	},
 }

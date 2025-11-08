@@ -17,7 +17,7 @@ var configGetCmd = &cobra.Command{
 
 		value, err := config.Get(key)
 		if err != nil {
-			return fmt.Errorf("failed to get config: %w", err)
+			return fmt.Errorf("❌ Unknown config key: '%s'\n\n💡 Valid keys: max-retries, backoff-base, worker-count", key)
 		}
 
 		fmt.Println(value)
@@ -35,7 +35,11 @@ var configSetCmd = &cobra.Command{
 		value := args[1]
 
 		if err := config.Set(key, value); err != nil {
-			return fmt.Errorf("failed to set config: %w", err)
+			// Check if it's an unknown key error
+			if err.Error() == fmt.Sprintf("unknown config key: %s", key) {
+				return fmt.Errorf("❌ Unknown config key: '%s'\n\n💡 Valid keys: max-retries, backoff-base, worker-count", key)
+			}
+			return fmt.Errorf("❌ Failed to set config: %w", err)
 		}
 
 		fmt.Printf("Configuration '%s' set to '%s'\n", key, value)

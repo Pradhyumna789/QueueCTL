@@ -28,7 +28,7 @@ var listCmd = &cobra.Command{
 				validState != job.StateCompleted &&
 				validState != job.StateFailed &&
 				validState != job.StateDead {
-				return fmt.Errorf("invalid state: %s. Valid states: pending, processing, completed, failed, dead", stateFlag)
+				return fmt.Errorf("❌ Invalid state: '%s'\n\n💡 Valid states: pending, processing, completed, failed, dead", stateFlag)
 			}
 
 			jobs, err = job.ListByState(validState)
@@ -54,11 +54,14 @@ var listCmd = &cobra.Command{
 			}
 		}
 
-		// Output as JSON
+		// Output as JSON (always output array, even if empty)
+		if jobs == nil {
+			jobs = []*job.Job{}
+		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(jobs); err != nil {
-			return fmt.Errorf("failed to encode jobs: %w", err)
+			return fmt.Errorf("❌ Failed to encode jobs: %w", err)
 		}
 
 		return nil

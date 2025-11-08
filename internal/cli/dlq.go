@@ -20,7 +20,7 @@ var dlqListCmd = &cobra.Command{
 		}
 
 		if len(jobs) == 0 {
-			fmt.Println("No jobs in Dead Letter Queue")
+			fmt.Println("ℹ️  No jobs in Dead Letter Queue")
 			return nil
 		}
 
@@ -44,10 +44,10 @@ var dlqRetryCmd = &cobra.Command{
 		jobID := args[0]
 
 		if err := job.RetryDeadJob(jobID); err != nil {
-			return fmt.Errorf("failed to retry job: %w", err)
+			return fmt.Errorf("❌ Failed to retry job: %w\n\n💡 Make sure the job ID exists in DLQ: queuectl dlq list", err)
 		}
 
-		fmt.Printf("Job '%s' moved back to pending state\n", jobID)
+		fmt.Printf("✅ Job '%s' moved back to pending state\n", jobID)
 		return nil
 	},
 }
