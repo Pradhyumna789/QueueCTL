@@ -2,7 +2,9 @@ package job
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"time"
 )
 
@@ -13,8 +15,18 @@ type ExecuteResult struct {
 }
 
 // Execute executes a job command and returns the result
+// Cross-platform: Uses sh -c on Unix/Linux/macOS, cmd /c on Windows
 func Execute(j *Job) ExecuteResult {
-	cmd := exec.Command("sh", "-c", j.Command)
+	var cmd *exec.Cmd
+	
+	if runtime.GOOS == "windows" {
+		// Windows: Use cmd.exe /c for command execution
+		// This works with both CMD and PowerShell commands
+		cmd = exec.Command("cmd.exe", "/c", j.Command)
+	} else {
+		// Unix/Linux/macOS: Use sh -c for command execution
+		cmd = exec.Command("sh", "-c", j.Command)
+	}
 	
 	if err := cmd.Run(); err != nil {
 		return ExecuteResult{
