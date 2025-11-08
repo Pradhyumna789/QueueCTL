@@ -30,8 +30,10 @@ func Init() error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Enable foreign keys and set WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;"); err != nil {
+	// Enable foreign keys, set WAL mode for better concurrency, and set busy timeout
+	// busy_timeout sets how long SQLite will wait for a lock (in milliseconds)
+	// 5000ms = 5 seconds
+	if _, err := db.Exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;"); err != nil {
 		return fmt.Errorf("failed to set database pragmas: %w", err)
 	}
 

@@ -26,6 +26,11 @@ func Create(j *Job) error {
 		nil,
 	)
 	if err != nil {
+		// Check if it's a UNIQUE constraint error (duplicate ID)
+		if err.Error() == "UNIQUE constraint failed: jobs.id" ||
+		   err.Error() == "constraint failed: UNIQUE constraint failed: jobs.id" {
+			return fmt.Errorf("job with ID '%s' already exists", j.ID)
+		}
 		return fmt.Errorf("failed to create job: %w", err)
 	}
 	return nil
