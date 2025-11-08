@@ -82,13 +82,15 @@ func GetByID(id string) (*Job, error) {
 }
 
 // GetNextPendingJob retrieves the next pending job that's ready for processing
+// Also checks for failed jobs that are ready for retry (next_retry_at <= now)
 // Uses SELECT FOR UPDATE to lock the row
 func GetNextPendingJob(tx *sql.Tx) (*Job, error) {
 	now := time.Now().Format(time.RFC3339)
 	query := `
 		SELECT id, command, state, attempts, max_retries, created_at, updated_at, next_retry_at
 		FROM jobs
-		WHERE state = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)
+		WHERE (state = ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
+		   OR (state = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
 		ORDER BY created_at ASC
 		LIMIT 1
 		FOR UPDATE`
@@ -97,7 +99,7 @@ func GetNextPendingJob(tx *sql.Tx) (*Job, error) {
 	var createdAtStr, updatedAtStr string
 	var nextRetryAtStr sql.NullString
 
-	err := tx.QueryRow(query, string(StatePending), now).Scan(
+	err := tx.QueryRow(query, string(StatePending), now, string(StateFailed), now).Scan(
 		&j.ID,
 		&j.Command,
 		&j.State,
@@ -131,6 +133,15 @@ func GetNextPendingJob(tx *sql.Tx) (*Job, error) {
 			return nil, fmt.Errorf("failed to parse next_retry_at: %w", err)
 		}
 		j.NextRetryAt = &nextRetryAt
+	}
+
+	// If it's a failed job ready for retry, update it to pending
+	if j.State == StateFailed {
+		if err := UpdateState(tx, j.ID, StatePending, j.Attempts, nil); err != nil {
+			return nil, fmt.Errorf("failed to update failed job to pending: %w", err)
+		}
+		j.State = StatePending
+		j.NextRetryAt = nil
 	}
 
 	return &j, nil
