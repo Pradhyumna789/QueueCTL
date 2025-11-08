@@ -21,9 +21,11 @@ type Pool struct {
 
 // Worker represents a single worker goroutine
 type Worker struct {
-	id      int
-	pool    *Pool
-	running bool
+	id          int
+	pool        *Pool
+	running     bool
+	currentJob  *job.Job
+	mu          sync.Mutex
 }
 
 var globalPool *Pool
@@ -100,34 +102,67 @@ func (w *Worker) run() {
 	w.pool.mu.Unlock()
 
 	for {
+		// Check for shutdown signal
 		select {
 		case <-w.pool.ctx.Done():
 			// Graceful shutdown - finish current job if any
+			w.mu.Lock()
+			currentJob := w.currentJob
+			w.mu.Unlock()
+			
+			if currentJob != nil {
+				// Job is currently executing (ExecuteJob is blocking)
+				// It will finish before we can exit, which is correct behavior
+				fmt.Printf("Worker %d: Finishing current job %s before shutdown...\n", w.id, currentJob.ID)
+			}
+			
 			w.pool.mu.Lock()
 			w.running = false
 			w.pool.mu.Unlock()
 			return
 		default:
-			// Try to get next job
-			j, err := GetNextJob()
-			if err != nil {
-				fmt.Printf("Worker %d: Error getting next job: %v\n", w.id, err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
+		}
 
-			if j == nil {
-				// No jobs available, wait a bit
-				time.Sleep(1 * time.Second)
-				continue
-			}
+		// Try to get next job
+		j, err := GetNextJob()
+		if err != nil {
+			fmt.Printf("Worker %d: Error getting next job: %v\n", w.id, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
 
-			// Execute the job
-			if err := ExecuteJob(j); err != nil {
-				fmt.Printf("Worker %d: Error executing job %s: %v\n", w.id, j.ID, err)
-			} else {
-				fmt.Printf("Worker %d: Completed job %s\n", w.id, j.ID)
-			}
+		if j == nil {
+			// No jobs available, wait a bit
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		// Track current job
+		w.mu.Lock()
+		w.currentJob = j
+		w.mu.Unlock()
+
+		// Execute the job (blocking call - if shutdown is requested during execution,
+		// this will complete first, then we'll check ctx.Done() on next iteration)
+		if err := ExecuteJob(j); err != nil {
+			fmt.Printf("Worker %d: Error executing job %s: %v\n", w.id, j.ID, err)
+		} else {
+			fmt.Printf("Worker %d: Completed job %s\n", w.id, j.ID)
+		}
+
+		// Clear current job
+		w.mu.Lock()
+		w.currentJob = nil
+		w.mu.Unlock()
+
+		// Check for shutdown after job execution (don't pick up new job if shutting down)
+		select {
+		case <-w.pool.ctx.Done():
+			w.pool.mu.Lock()
+			w.running = false
+			w.pool.mu.Unlock()
+			return
+		default:
 		}
 	}
 }
