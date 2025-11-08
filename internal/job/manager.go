@@ -83,17 +83,19 @@ func GetByID(id string) (*Job, error) {
 
 // GetNextPendingJob retrieves the next pending job that's ready for processing
 // Also checks for failed jobs that are ready for retry (next_retry_at <= now)
-// Uses SELECT FOR UPDATE to lock the row
+// Uses atomic SELECT and UPDATE to prevent duplicate processing
 func GetNextPendingJob(tx *sql.Tx) (*Job, error) {
 	now := time.Now().Format(time.RFC3339)
+	// SQLite doesn't support FOR UPDATE the same way, so we use a different approach:
+	// 1. Select the job
+	// 2. Immediately update its state to prevent other workers from picking it
 	query := `
 		SELECT id, command, state, attempts, max_retries, created_at, updated_at, next_retry_at
 		FROM jobs
 		WHERE (state = ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
 		   OR (state = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
 		ORDER BY created_at ASC
-		LIMIT 1
-		FOR UPDATE`
+		LIMIT 1`
 
 	var j Job
 	var createdAtStr, updatedAtStr string

@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"database/sql"
 	"fmt"
+	"time"
 
 	"queuectl/internal/config"
 	"queuectl/internal/db"
@@ -15,28 +17,14 @@ func ExecuteJob(j *job.Job) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Start transaction for atomic state update
-	tx, err := db.GetDB().Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Update job to processing state
-	if err := job.UpdateState(tx, j.ID, job.StateProcessing, j.Attempts, nil); err != nil {
-		return fmt.Errorf("failed to update job to processing: %w", err)
-	}
-
-	// Commit the state change
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
+	// Job is already in processing state (set by GetNextJob)
+	// No need to update it again
 
 	// Execute the job
 	result := job.Execute(j)
 
-	// Start new transaction for result update
-	tx, err = db.GetDB().Begin()
+	// Start transaction for result update
+	tx, err := db.GetDB().Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -75,29 +63,131 @@ func ExecuteJob(j *job.Job) error {
 
 // GetNextJob retrieves and locks the next available job
 func GetNextJob() (*job.Job, error) {
-	tx, err := db.GetDB().Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Get next pending job (this also handles failed jobs ready for retry)
-	j, err := job.GetNextPendingJob(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	if j == nil {
+	// For SQLite, we use an atomic UPDATE to claim the job
+	// This prevents race conditions by updating the state atomically
+	now := time.Now().Format(time.RFC3339)
+	
+	// Retry logic for SQLITE_BUSY errors
+	maxRetries := 5
+	retryDelay := 10 * time.Millisecond
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		tx, err := db.GetDB().Begin()
+		if err != nil {
+			// Check if it's a SQLITE_BUSY error
+			if err.Error() == "database is locked" || 
+			   err.Error() == "database is locked (5)" ||
+			   err.Error() == "SQLITE_BUSY" {
+				if attempt < maxRetries-1 {
+					time.Sleep(retryDelay)
+					retryDelay *= 2 // Exponential backoff
+					continue
+				}
+			}
+			return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer tx.Rollback()
+	
+	// Step 1: Get the ID of the next job to claim
+	var jobID string
+	selectQuery := `
+		SELECT id FROM jobs
+		WHERE (state = ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
+		   OR (state = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?)
+		ORDER BY created_at ASC
+		LIMIT 1`
+	
+	err = tx.QueryRow(selectQuery, 
+		string(job.StatePending),
+		now,
+		string(job.StateFailed),
+		now,
+	).Scan(&jobID)
+	
+	if err == sql.ErrNoRows {
 		tx.Rollback()
 		return nil, nil // No jobs available
 	}
-
-	// Commit the transaction to release the lock
-	// The job is already locked and updated to pending if it was failed
+	if err != nil {
+		return nil, fmt.Errorf("failed to select next job: %w", err)
+	}
+	
+	// Step 2: Atomically update the job to processing state
+	// This prevents other workers from picking it up
+	updateQuery := `
+		UPDATE jobs
+		SET state = ?, updated_at = ?, next_retry_at = NULL
+		WHERE id = ? AND (state = ? OR state = ?)`
+	
+	result, err := tx.Exec(updateQuery,
+		string(job.StateProcessing),
+		time.Now().Format(time.RFC3339),
+		jobID,
+		string(job.StatePending),
+		string(job.StateFailed),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to claim job: %w", err)
+	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	
+	if rowsAffected == 0 {
+		// Another worker claimed it between SELECT and UPDATE
+		tx.Rollback()
+		return nil, nil
+	}
+	
+	// Step 3: Select the job we just claimed
+	selectJobQuery := `
+		SELECT id, command, state, attempts, max_retries, created_at, updated_at, next_retry_at
+		FROM jobs
+		WHERE id = ?`
+	
+	var j job.Job
+	var createdAtStr, updatedAtStr string
+	var nextRetryAtStr sql.NullString
+	
+	err = tx.QueryRow(selectJobQuery, jobID).Scan(
+		&j.ID,
+		&j.Command,
+		&j.State,
+		&j.Attempts,
+		&j.MaxRetries,
+		&createdAtStr,
+		&updatedAtStr,
+		&nextRetryAtStr,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get claimed job: %w", err)
+	}
+	
+	// Parse timestamps
+	j.CreatedAt, err = time.Parse(time.RFC3339, createdAtStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse created_at: %w", err)
+	}
+	
+	j.UpdatedAt, err = time.Parse(time.RFC3339, updatedAtStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse updated_at: %w", err)
+	}
+	
+	if nextRetryAtStr.Valid {
+		nextRetryAt, err := time.Parse(time.RFC3339, nextRetryAtStr.String)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse next_retry_at: %w", err)
+		}
+		j.NextRetryAt = &nextRetryAt
+	}
+	
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
-
-	return j, nil
+	
+	return &j, nil
 }
 
